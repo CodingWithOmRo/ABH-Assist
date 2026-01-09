@@ -1,0 +1,9 @@
+required_docs:
+  - passport
+  - residence_permit_card
+  - proof_of_income
+  - pension_insurance_record
+  - health_insurance_proof
+  - integration_course_certificate
+conditional_docs: []
+notes: "Permanent residence requires 60 months of pension contributions."

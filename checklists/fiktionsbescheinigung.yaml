@@ -1,0 +1,6 @@
+required_docs:
+  - passport
+  - residence_permit_card
+  - appointment_confirmation
+conditional_docs: []
+notes: "Fiktionsbescheinigung is usually issued when a decision is pending."

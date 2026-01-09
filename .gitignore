@@ -1,0 +1,28 @@
+# Virtual Environments
+venv/
+venv311/
+.env
+
+# Python compilation
+__pycache__/
+*.py[cod]
+*$py.class
+
+# IDE settings
+.vscode/
+.idea/
+
+# ABH-Assist specific data folders
+# (Keep the folders themselves using .gitkeep if needed, but ignore contents)
+cases/*
+!cases/.gitkeep
+outputs/*
+!outputs/.gitkeep
+chroma_db/
+
+# Large Models (Download them via code or script instead)
+models/*.bin
+models/*.gguf
+
+# Logs and temp files
+*.log

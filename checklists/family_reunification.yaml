@@ -1,0 +1,11 @@
+required_docs:
+  - passport
+  - residence_permit_card
+  - marriage_certificate
+  - proof_of_income
+  - rental_contract
+conditional_docs:
+  - if: child_joining
+    docs:
+      - birth_certificate
+notes: "Ensure income is sufficient for family size."

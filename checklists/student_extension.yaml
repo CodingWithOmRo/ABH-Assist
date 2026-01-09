@@ -1,0 +1,7 @@
+required_docs:
+  - passport
+  - university_enrollment
+  - health_insurance_proof
+  - bank_statement
+conditional_docs: []
+notes: "Check blocked account (Sperrkonto) amount."

@@ -1,0 +1,13 @@
+model_path: "./models/mistral-7b-instruct-v0.2.Q4_K_M.gguf"
+n_ctx: 2048       # Keep reduced context for stability
+n_gpu_layers: -1  # Return to full offload (partial offload caused layout error)
+n_batch: 512      # Standard batch size
+n_threads: 8      # Number of CPU threads to use
+temperature: 0.1
+top_p: 0.95
+repeat_penalty: 1.1
+# mode: "llama_cpp_python" or "llama_cpp_server"
+mode: "llama_cpp_python"
+server_url: "http://localhost:8000/v1"
+embedding_model: "intfloat/multilingual-e5-small"
+chroma_db_path: "./chroma_db"

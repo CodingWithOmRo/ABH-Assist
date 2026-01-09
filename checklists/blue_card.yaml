@@ -1,0 +1,7 @@
+required_docs:
+  - passport
+  - university_degree
+  - employment_contract
+  - proof_of_income
+conditional_docs: []
+notes: "Salary threshold must be met."

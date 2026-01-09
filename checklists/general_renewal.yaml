@@ -1,0 +1,12 @@
+required_docs:
+  - application_form
+  - passport
+  - residence_permit_card
+  - meldebescheinigung
+  - proof_of_income
+  - health_insurance_proof
+conditional_docs:
+  - if: employed
+    docs:
+      - employment_contract
+notes: "Standard renewal check."
