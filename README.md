@@ -22,8 +22,10 @@ A local, offline-first assistant for Ausländerbehörde intake processes.
     Update `config.yaml` with the filename.
 
 4.  **Run Application**:
-    ```bash
-    streamlit run app.py
+    ```powershell
+    # Use venv311 environment with GPU support
+    $env:PATH = "C:\Users\omidr\Feinprojekt\venv311\Lib\site-packages\llama_cpp\lib;C:\Users\omidr\Feinprojekt\venv311\Lib\site-packages\nvidia\cublas\bin;C:\Users\omidr\Feinprojekt\venv311\Lib\site-packages\nvidia\cuda_runtime\bin;C:\Users\omidr\Feinprojekt\venv311\Lib\site-packages\nvidia\cudnn\bin;" + $env:PATH
+    & "C:\Users\omidr\Feinprojekt\venv311\Scripts\python.exe" -m streamlit run "C:\Users\omidr\Feinprojekt\app.py"
     ```
 
 ## Configuration
