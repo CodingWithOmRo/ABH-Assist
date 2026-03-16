@@ -1,12 +1,38 @@
-# ABH-Assist (PoC)
+# ABH-Assist
 
-A local, offline-first assistant for Ausländerbehörde intake processes.
+Ein lokaler, offline-fähiger Assistent für Ausländerbehörden-Aufnahmeprozesse.
 
 ## Features
-- **Local LLM**: Uses `llama.cpp` for privacy and offline capability.
-- **Document Analysis**: Classifies documents, extracts text, and checks for missing items.
-- **Checklists**: Configurable YAML checklists for different case types.
-- **RAG**: Retrieval Augmented Generation for consistent guidance.
+- **Lokales LLM**: Verwendet `llama.cpp` für Datenschutz und Offline-Fähigkeit.
+- **Dokumentenanalyse**: Klassifiziert Dokumente, extrahiert Text und prüft fehlende Unterlagen.
+- **Akten-Verwaltung**: Erstellt und verwaltet Akten für jeden Antragsteller.
+- **Intelligente Datenextraktion**: Extrahiert automatisch Namen, Geburtsdaten, Passnummern etc.
+- **Konsistenzprüfung**: Vergleicht Reisepass-Daten mit Antragsformulardaten.
+- **Checklisten**: Konfigurierbare YAML-Checklisten für verschiedene Falltypen.
+- **RAG**: Retrieval Augmented Generation für konsistente Beratung.
+
+## Hauptfunktionen
+
+### 🏛️ Neue Analyse (Hauptseite)
+- PDF-Dokumente per Drag & Drop hochladen
+- Automatische Klassifizierung (Reisepass, Antrag, Mietvertrag, etc.)
+- Extrahiert Antragstellername und erstellt automatisch eine Akte
+- Prüft auf existierende Akten und bietet Aktualisierung an
+- Vollständige Analyse mit Übersicht, Dokumentendetails, Konsistenzprüfung
+
+### 📁 Akten-Übersicht
+- Listet alle Akten im System
+- Suchfunktion nach Name oder Akte-ID
+- Filter nach Status (Neu, Unvollständig, Vollständig, Abgeschlossen)
+- Klicken auf Namen öffnet die vollständige Akte
+
+### 📄 Akte Details
+- Vollständige Ansicht aller hochgeladenen Dokumente
+- Status-Tracking (Neu → Unvollständig → Vollständig → Abgeschlossen)
+- Übersicht fehlender Dokumente
+- Konsistenzprüfung zwischen Reisepass und Antrag
+- Offene Fragen für Antragsteller
+- Aktennotiz-Entwurf (herunterladbar)
 
 ## Setup
 

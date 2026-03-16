@@ -39,9 +39,13 @@ def check_consistency(extracted_data):
                     })
             
             # Programmatic check for empty critical fields
-            critical_fields = ['full_name', 'date_of_birth', 'nationality']
+            critical_fields = ['full_name', 'date_of_birth', 'nationality', 'passport_number']
+            missing_count = 0
             for field in critical_fields:
-                if not item.get(field):
+                field_val = item.get(field)
+                # Check if field is None, empty string, or "null"
+                if not field_val or field_val == "null" or (isinstance(field_val, str) and not field_val.strip()):
+                    missing_count += 1
                     flags.append({
                         "code": "FLAG_MISSING_DATA",
                         "severity": "HIGH",
@@ -49,6 +53,16 @@ def check_consistency(extracted_data):
                         "reason": f"Application Form is missing critical field: {field}",
                         "evidence_snippet": "Field Check"
                     })
+            
+            # If ALL critical fields are missing, it's likely a blank form
+            if missing_count == len(critical_fields):
+                flags.append({
+                    "code": "FLAG_BLANK_FORM",
+                    "severity": "CRITICAL",
+                    "confidence": 1.0,
+                    "reason": "Application Form appears to be completely blank/unfilled",
+                    "evidence_snippet": "All critical fields are empty"
+                })
 
         # Check expiry
         if 'expiry_date' in item and item['expiry_date']:

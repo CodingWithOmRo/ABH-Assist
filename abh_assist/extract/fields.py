@@ -34,32 +34,62 @@ def parse_form_data_section(text):
         for line in section.split('\n'):
             if ": " in line:
                 k, v = line.split(": ", 1)
-                raw_map[k.strip()] = v.strip()
+                # Clean up key: remove array indices like [0], [1] etc.
+                clean_key = re.sub(r'\[\d+\]', '', k.strip())
+                raw_map[clean_key] = v.strip()
         
         # Map common German form fields to our schema
-        # Adjust these keys based on what your specific PDF produces
-        if 'Nachname' in raw_map:
-            data['surname'] = raw_map['Nachname']
-        elif 'Familienname' in raw_map:
-            data['surname'] = raw_map['Familienname']
+        # Handle various field name variations
+        surname_keys = ['Nachname', 'Familienname', 'surname']
+        for key in surname_keys:
+            if key in raw_map and raw_map[key]:
+                data['surname'] = raw_map[key]
+                break
 
-        if 'Vorname' in raw_map:
-            data['given_names'] = raw_map['Vorname']
-        elif 'Vornamen' in raw_map:
-            data['given_names'] = raw_map['Vornamen']
+        given_name_keys = ['Vorname', 'Vornamen', 'given_names']
+        for key in given_name_keys:
+            if key in raw_map and raw_map[key]:
+                data['given_names'] = raw_map[key]
+                break
         
         # Construct full name
         if 'surname' in data or 'given_names' in data:
             data['full_name'] = f"{data.get('surname', '')}, {data.get('given_names', '')}".strip(', ')
-            
-        if 'Geburtsdatum' in raw_map:
-            data['date_of_birth'] = raw_map['Geburtsdatum']
-        if 'Staatsangehörigkeit' in raw_map:
-            data['nationality'] = raw_map['Staatsangehörigkeit']
-        if 'Passnummer' in raw_map:
-            data['passport_number'] = raw_map['Passnummer']
-        if 'Ort, Datum' in raw_map:
-            data['application_date'] = raw_map['Ort, Datum']
+        
+        # Date of birth - try multiple variations
+        dob_keys = ['Geburtsdatum', 'RP_Geburtsdatum', 'date_of_birth']
+        for key in dob_keys:
+            if key in raw_map and raw_map[key]:
+                data['date_of_birth'] = raw_map[key]
+                break
+        
+        # Nationality
+        nationality_keys = ['Staatsangehörigkeit', 'Staatsangehoerigkeit', 'nationality']
+        for key in nationality_keys:
+            if key in raw_map and raw_map[key]:
+                data['nationality'] = raw_map[key]
+                break
+        
+        # Passport number
+        passport_keys = ['Passnummer', 'Pass Nr', 'passport_number']
+        for key in passport_keys:
+            if key in raw_map and raw_map[key]:
+                data['passport_number'] = raw_map[key]
+                break
+        
+        # Application date
+        date_keys = ['Ort, Datum', 'Tagesdatum', 'Datum']
+        for key in date_keys:
+            if key in raw_map and raw_map[key]:
+                data['application_date'] = raw_map[key]
+                break
+        
+        # Address
+        address_keys = ['Anschrift', 'Adresse', 'address']
+        for key in address_keys:
+            if key in raw_map and raw_map[key]:
+                data['address'] = raw_map[key]
+                break
             
     except Exception as e:
         print(f"Error parsing form data section: {e}")
@@ -113,5 +143,20 @@ def extract_fields_llm(text, doc_type):
         for k, v in pre_parsed_data.items():
             if v and (k not in extracted_data or not extracted_data[k] or extracted_data[k] == "null"):
                 extracted_data[k] = v
+    
+    # Ensure application forms always have expected keys (even if null)
+    # This ensures comparison tables can display proper status
+    if doc_type == "application_form":
+        expected_keys = ["full_name", "date_of_birth", "nationality", "passport_number"]
+        for key in expected_keys:
+            if key not in extracted_data or extracted_data[key] == "null":
+                extracted_data[key] = None
+    
+    # Same for passports
+    if doc_type == "passport":
+        expected_keys = ["full_name", "date_of_birth", "nationality", "passport_number"]
+        for key in expected_keys:
+            if key not in extracted_data or extracted_data[key] == "null":
+                extracted_data[key] = None
                 
     return extracted_data

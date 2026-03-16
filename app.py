@@ -10,11 +10,22 @@ from abh_assist.extract.consistency import check_consistency
 from abh_assist.report.build_report import generate_final_report
 from abh_assist.report.export import save_report
 from abh_assist.rag.index import build_index
+from abh_assist.case import save_case_metadata
 
-st.set_page_config(page_title="ABH-Assist", layout="wide")
+st.set_page_config(page_title="ABH-Assist", page_icon="🏛️", layout="wide")
 
-st.title("ABH-Assist (PoC)")
+def normalize_name(name_value):
+    """Convert name dict to string format."""
+    if isinstance(name_value, dict):
+        surname = name_value.get('surname', '')
+        given_names = name_value.get('given_names', '')
+        return f"{given_names} {surname}".strip()
+    return str(name_value) if name_value else "Unbekannt"
+
+st.title("🏛️ ABH-Assist")
 st.markdown("**Empfangsassistent für Ausländerbehörde** - *Lokal, Offline, Sicher*")
+
+st.divider()
 
 # Sidebar Configuration
 st.sidebar.header("Fallkonfiguration")
@@ -104,7 +115,7 @@ if st.button("Fall analysieren"):
         # 3. Extraction & Consistency
         status_text.text("Daten werden extrahiert und geprüft...")
         extracted_data = []
-        applicant_name = "Unknown"
+        applicant_name = "Unbekannt"
         
         for doc in classified_docs:
             fields = extract_fields_llm(doc['text'], doc['doc_type'])
@@ -112,30 +123,34 @@ if st.button("Fall analysieren"):
             extracted_data.append(doc)
             
             # Try to find applicant name
-            if applicant_name == "Unknown" and 'full_name' in fields:
-                applicant_name = fields['full_name']
+            if applicant_name == "Unbekannt" and 'full_name' in fields:
+                applicant_name = normalize_name(fields['full_name'])
         
-        # Update Case ID if name found
-        if applicant_name != "Unknown":
+        # Create Case ID with name if found
+        if applicant_name != "Unbekannt":
             # Sanitize name for folder usage
             safe_name = "".join([c for c in applicant_name if c.isalnum() or c in (' ', '_')]).strip().replace(' ', '_')
             new_case_id = f"Case_{safe_name}"
             
             # Rename folder
             new_case_dir = os.path.join("cases", new_case_id)
-            if not os.path.exists(new_case_dir):
-                try:
-                    os.rename(case_dir, new_case_dir)
-                    case_id = new_case_id
-                    case_dir = new_case_dir
-                except Exception as e:
-                    st.warning(f"Konnte Fallordner nicht umbenennen: {e}")
-            else:
-                # If exists, maybe append timestamp or just use it (merging)
-                # For this PoC, we'll just keep the temp ID if collision or simple logic
-                pass
             
-            st.sidebar.success(f"Fall zugewiesen: {new_case_id}")
+            # If case already exists, add timestamp to differentiate
+            if os.path.exists(new_case_dir):
+                from datetime import datetime
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                new_case_id = f"Case_{safe_name}_{timestamp}"
+                new_case_dir = os.path.join("cases", new_case_id)
+            
+            try:
+                os.rename(case_dir, new_case_dir)
+                case_id = new_case_id
+                case_dir = new_case_dir
+                st.success(f"✅ Neue Akte erstellt: **{applicant_name}** (ID: {case_id})")
+            except Exception as e:
+                st.warning(f"Konnte Fallordner nicht umbenennen: {e}")
+        else:
+            st.warning("⚠️ Konnte keinen Namen aus den Dokumenten extrahieren. Akte wird mit ID 'case_temp' erstellt.")
 
         flags = check_consistency(extracted_data)
         progress_bar.progress(0.7)
@@ -152,6 +167,26 @@ if st.button("Fall analysieren"):
         final_report = generate_final_report(report_data)
         progress_bar.progress(1.0)
         status_text.text("Analyse abgeschlossen.")
+
+        # Save case metadata
+        case_status = "Vollständig" if not missing_docs else "Unvollständig"
+        
+        case_metadata = {
+            'case_id': case_id,
+            'applicant_name': applicant_name,
+            'case_type': case_type_map[selected_case_code],
+            'case_type_code': selected_case_code,
+            'status': case_status,
+            'missing_documents': missing_docs,
+            'document_count': len(classified_docs),
+            'case_details': case_details
+        }
+        
+        save_case_metadata(case_id, case_metadata)
+        
+        # Store in session state for navigation
+        st.session_state['current_case_id'] = case_id
+        st.session_state['analysis_complete'] = True
 
         # Display Results
         st.divider()
@@ -292,8 +327,14 @@ if st.button("Fall analysieren"):
                 ]
                 
                 for label, key in fields_to_compare:
-                    pass_val = passport_doc.get(key, "N/A")
-                    form_val = app_form_doc.get(key, "N/A")
+                    pass_val = passport_doc.get(key, None)
+                    form_val = app_form_doc.get(key, None)
+                    
+                    # Convert None to empty string for cleaner display
+                    if pass_val is None or pass_val == "null":
+                        pass_val = ""
+                    if form_val is None or form_val == "null":
+                        form_val = ""
                     
                     # Normalize Passport Value (handle dict if present)
                     if isinstance(pass_val, dict):
@@ -314,8 +355,17 @@ if st.button("Fall analysieren"):
                     p_str = str(pass_val).lower().strip()
                     f_str = str(form_val).lower().strip()
                     
-                    if pass_val == "N/A" or form_val == "N/A" or not pass_val or not form_val:
-                        match = "⚠️ Fehlt"
+                    # Check if either value is missing/empty
+                    if not p_str and not f_str:
+                        match = "⚠️ Beide fehlen"
+                        pass_val = "(leer)"
+                        form_val = "(leer)"
+                    elif not p_str:
+                        match = "⚠️ Pass fehlt"
+                        pass_val = "(leer)"
+                    elif not f_str:
+                        match = "⚠️ Antrag fehlt"
+                        form_val = "(leer)"
                     elif p_str != f_str:
                         # Fuzzy check for names (order swap)
                         if key == "full_name" and (p_str.replace(',', '') == f_str.replace(',', '') or 
