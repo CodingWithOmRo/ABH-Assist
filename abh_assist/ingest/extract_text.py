@@ -40,9 +40,10 @@ def extract_text_from_file(file_path):
                 print(f"Form extraction warning: {e}")
 
             # 2. Extract Standard Text
-            for page in reader.pages:
+            for page_number, page in enumerate(reader.pages, start=1):
                 page_text = page.extract_text(extraction_mode="layout")
                 if page_text:
+                    text += f"\n--- PAGE {page_number} ---\n"
                     text += page_text + "\n"
                 
             # 3. Fallback to OCR if text is too sparse (scanned PDF or image-only)
@@ -52,11 +53,12 @@ def extract_text_from_file(file_path):
                 
                 # Extract images directly from PDF (No Poppler required)
                 try:
-                    for page in reader.pages:
+                    for page_number, page in enumerate(reader.pages, start=1):
                         for image_file in page.images:
                             try:
                                 image_data = image_file.data
                                 img = Image.open(io.BytesIO(image_data))
+                                ocr_text += f"\n--- PAGE {page_number} OCR ---\n"
                                 ocr_text += pytesseract.image_to_string(img, lang='deu+eng') + "\n"
                             except Exception as img_err:
                                 print(f"Failed to process an image in PDF: {img_err}")

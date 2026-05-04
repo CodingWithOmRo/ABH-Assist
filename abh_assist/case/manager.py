@@ -107,8 +107,9 @@ def get_case_documents(case_id: str) -> List[str]:
         return []
     
     documents = []
+    supported_extensions = ('.pdf', '.png', '.jpg', '.jpeg', '.tiff', '.bmp')
     for filename in os.listdir(case_dir):
-        if filename.endswith('.pdf') or filename.endswith('.png') or filename.endswith('.jpg'):
+        if filename.lower().endswith(supported_extensions):
             documents.append(filename)
     
     return documents

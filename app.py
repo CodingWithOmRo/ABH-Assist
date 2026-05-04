@@ -1,411 +1,277 @@
-import streamlit as st
 import os
 import shutil
+from datetime import datetime
+
 import pandas as pd
-from abh_assist.ingest.extract_text import extract_text_from_file
-from abh_assist.classify.doc_classifier import classify_document
-from abh_assist.checklist.engine import check_documents, load_checklist
-from abh_assist.extract.fields import extract_fields_llm
-from abh_assist.extract.consistency import check_consistency
-from abh_assist.report.build_report import generate_final_report
+import streamlit as st
+
+from abh_assist.case import analyze_case_documents, save_case_metadata
+from abh_assist.extract.timeline import timeline_entries_to_rows
 from abh_assist.report.export import save_report
-from abh_assist.rag.index import build_index
-from abh_assist.case import save_case_metadata
+
 
 st.set_page_config(page_title="ABH-Assist", page_icon="🏛️", layout="wide")
 
+
+GOAL_PRESETS = [
+    "Aufenthaltsbeendigung",
+    "Identitätsklärung",
+    "Widerruf oder Rücknahme eines Aufenthaltstitels",
+    "Prüfung Duldung",
+    "Benutzerdefiniertes Ziel",
+]
+
+
 def normalize_name(name_value):
-    """Convert name dict to string format."""
     if isinstance(name_value, dict):
-        surname = name_value.get('surname', '')
-        given_names = name_value.get('given_names', '')
+        surname = name_value.get("surname", "")
+        given_names = name_value.get("given_names", "")
         return f"{given_names} {surname}".strip()
     return str(name_value) if name_value else "Unbekannt"
 
-st.title("🏛️ ABH-Assist")
-st.markdown("**Empfangsassistent für Ausländerbehörde** - *Lokal, Offline, Sicher*")
 
+def build_case_id(applicant_name):
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    if applicant_name and applicant_name != "Unbekannt":
+        safe_name = "".join(c for c in applicant_name if c.isalnum() or c in (" ", "_")).strip()
+        safe_name = safe_name.replace(" ", "_") or "Unbekannt"
+        base_id = f"Case_{safe_name}"
+    else:
+        base_id = f"Case_Aktenauswertung_{timestamp}"
+
+    case_id = base_id
+    case_dir = os.path.join("cases", case_id)
+    if os.path.exists(case_dir):
+        case_id = f"{base_id}_{timestamp}"
+    return case_id
+
+
+def get_analysis_goal():
+    st.sidebar.header("Ziel der Aktenauswertung")
+    selected_goal = st.sidebar.selectbox("Analyseziel", GOAL_PRESETS)
+    if selected_goal == "Benutzerdefiniertes Ziel":
+        goal = st.sidebar.text_area(
+            "Eigenes Ziel",
+            value="Aufenthaltsbeendigung",
+            height=120,
+        )
+    else:
+        goal = st.sidebar.text_area(
+            "Zielbeschreibung verfeinern",
+            value=selected_goal,
+            height=120,
+        )
+
+    st.sidebar.caption(
+        "Die Auswertung ist bewusst weit gefasst: Im Zweifel werden Eintraege aufgenommen, "
+        "damit nichts Dienliches fehlt."
+    )
+    return goal.strip() or "Aufenthaltsbeendigung"
+
+
+def display_timeline_report(final_report, case_id=None, txt_path=None, json_path=None):
+    entries = final_report.get("timeline_entries", [])
+    rows = timeline_entries_to_rows(entries)
+
+    tab1, tab2, tab3, tab4 = st.tabs(["Chronologie", "Dokumente", "Pruefhinweise", "Aktennotiz"])
+
+    with tab1:
+        st.subheader("Chronologische zielrelevante Eintraege")
+        st.caption(f"Ziel: {final_report.get('analysis_goal', 'Nicht angegeben')}")
+        if rows:
+            timeline_df = pd.DataFrame(rows)
+            st.dataframe(timeline_df, use_container_width=True, hide_index=True)
+            csv_data = timeline_df.to_csv(index=False, encoding="utf-8-sig")
+            st.download_button(
+                "Chronologie als CSV herunterladen",
+                data=csv_data,
+                file_name=f"chronologie_{case_id or 'akte'}.csv",
+                mime="text/csv",
+            )
+        else:
+            st.warning("Es wurden keine datierten zielrelevanten Eintraege gefunden.")
+
+        st.divider()
+        for entry in entries:
+            title = f"{entry.get('date') or 'Unbekannt'} - {entry.get('event') or 'Eintrag'}"
+            with st.expander(title):
+                st.write(f"**Kategorie:** {entry.get('category', 'Sonstiges')}")
+                st.write(f"**Dienlichkeit:** {entry.get('relevance', '-')}")
+                st.write(
+                    f"**Quelle:** {entry.get('source_document', '-')} "
+                    f"{entry.get('source_page_or_section', '')}"
+                )
+                st.write(f"**Datumsbasis:** {entry.get('date_basis', '-')}")
+                st.write(f"**Konfidenz:** {float(entry.get('confidence', 0) or 0):.2f}")
+                if entry.get("evidence_snippet"):
+                    st.code(entry["evidence_snippet"])
+
+    with tab2:
+        st.subheader("Durchsuchte Dokumente")
+        doc_rows = []
+        for doc in final_report.get("documents", []):
+            summary = next(
+                (
+                    item
+                    for item in final_report.get("document_summaries", [])
+                    if item.get("filename") == doc.get("filename")
+                ),
+                {},
+            )
+            doc_rows.append(
+                {
+                    "Dateiname": doc.get("filename"),
+                    "Typ": doc.get("doc_type"),
+                    "Konfidenz": f"{doc.get('confidence', 0):.2f}",
+                    "Textzeichen": summary.get("text_chars", len(doc.get("text", ""))),
+                    "Eintraege": summary.get("events_found", 0),
+                }
+            )
+
+        if doc_rows:
+            st.dataframe(pd.DataFrame(doc_rows), use_container_width=True, hide_index=True)
+
+        for doc in final_report.get("documents", []):
+            with st.expander(f"{doc.get('filename')} ({doc.get('doc_type')})"):
+                st.json({k: v for k, v in doc.items() if k != "text"})
+                st.text_area(
+                    "Extrahierter Text",
+                    value=doc.get("text", ""),
+                    height=240,
+                    key=f"text_{case_id}_{doc.get('filename')}",
+                )
+
+    with tab3:
+        st.subheader("Pruefhinweise zur Vollstaendigkeit")
+        notes = final_report.get("coverage_notes", [])
+        if notes:
+            for note in notes:
+                severity = note.get("severity", "LOW")
+                message = note.get("message", "")
+                documents = note.get("documents") or []
+                text = message if not documents else f"{message} Dokumente: {', '.join(documents)}"
+                if severity == "HIGH":
+                    st.error(text)
+                elif severity == "MEDIUM":
+                    st.warning(text)
+                else:
+                    st.info(text)
+        else:
+            st.success("Keine technischen Pruefhinweise.")
+
+        low_confidence = [entry for entry in entries if float(entry.get("confidence", 0) or 0) < 0.5]
+        if low_confidence:
+            st.markdown("#### Niedrig konfidente vorsorgliche Treffer")
+            st.dataframe(
+                pd.DataFrame(timeline_entries_to_rows(low_confidence)),
+                use_container_width=True,
+                hide_index=True,
+            )
+
+    with tab4:
+        st.subheader("Entwurf Aktennotiz")
+        st.text_area(
+            "Bearbeitbare Notiz",
+            value=final_report.get("aktennotiz_de", ""),
+            height=300,
+        )
+
+        col1, col2 = st.columns(2)
+        if txt_path and os.path.exists(txt_path):
+            with col1:
+                with open(txt_path, "r", encoding="utf-8") as f:
+                    st.download_button(
+                        "Aktennotiz herunterladen (.txt)",
+                        f.read(),
+                        file_name=f"case_{case_id}_note.txt",
+                    )
+        if json_path and os.path.exists(json_path):
+            with col2:
+                with open(json_path, "r", encoding="utf-8") as f:
+                    st.download_button(
+                        "Bericht herunterladen (.json)",
+                        f.read(),
+                        file_name=f"case_{case_id}_report.json",
+                    )
+
+
+st.title("🏛️ ABH-Assist")
+st.markdown("**Zielbezogene Aktenauswertung** - datierte dienliche Eintraege chronologisch finden")
 st.divider()
 
-# Sidebar Configuration
-st.sidebar.header("Fallkonfiguration")
-case_type_map = {
-    "A": "Verlängerung Aufenthaltstitel",
-    "B": "Fiktionsbescheinigung",
-    "C": "Niederlassungserlaubnis",
-    "D": "Familiennachzug",
-    "E": "Blaue Karte EU"
-}
-selected_case_code = st.sidebar.selectbox("Falltyp auswählen", list(case_type_map.keys()), format_func=lambda x: f"{x} - {case_type_map[x]}")
+analysis_goal = get_analysis_goal()
 
-st.sidebar.subheader("Falldetails")
-employed = st.sidebar.checkbox("Erwerbstätig?")
-student = st.sidebar.checkbox("Student?")
-child_joining = st.sidebar.checkbox("Familiennachzug (Kind)?")
+st.info(
+    "Laden Sie die digitale Akte als PDF-Dateien hoch. Die KI sucht alle datierten Eintraege "
+    "und Dokumentinhalte, die fuer das Ziel dienlich sein koennen, und sortiert sie chronologisch."
+)
 
-case_details = {
-    "employed": employed,
-    "student": student,
-    "child_joining": child_joining
-}
+uploaded_files = st.file_uploader(
+    "Akte hochladen",
+    accept_multiple_files=True,
+    type=["pdf", "png", "jpg", "jpeg", "tiff", "bmp"],
+)
 
-# --- NEW: Display Checklist Requirements Upfront ---
-checklist_data = load_checklist(selected_case_code)
-if checklist_data:
-    st.info(f"📋 **Erforderliche Unterlagen für: {case_type_map[selected_case_code]}**")
-    
-    req_docs = checklist_data.get('required_docs', [])
-    if req_docs:
-        st.markdown("Folgende Dokumente sind in der Regel erforderlich:")
-        for doc in req_docs:
-            st.markdown(f"- **{doc}**")
-    
-    # Optional: Show conditional requirements if you want to get fancy, 
-    # but for now let's stick to the main list or what's in the yaml.
-    
-    st.markdown("---")
-# ---------------------------------------------------
-
-# File Upload
-uploaded_files = st.file_uploader("Dokumente hochladen", accept_multiple_files=True, type=['pdf'])
-
-if st.button("Fall analysieren"):
+if st.button("Akte chronologisch auswerten", type="primary", use_container_width=True):
     if not uploaded_files:
         st.error("Bitte laden Sie zuerst Dokumente hoch.")
     else:
-        # Create temp case folder
-        case_id = "case_temp"
-        case_dir = os.path.join("cases", case_id)
-        if os.path.exists(case_dir):
-            shutil.rmtree(case_dir)
-        os.makedirs(case_dir)
+        temp_case_id = "case_temp"
+        temp_case_dir = os.path.join("cases", temp_case_id)
+        if os.path.exists(temp_case_dir):
+            shutil.rmtree(temp_case_dir)
+        os.makedirs(temp_case_dir, exist_ok=True)
 
-        # Progress Bar
+        for uploaded_file in uploaded_files:
+            file_path = os.path.join(temp_case_dir, uploaded_file.name)
+            with open(file_path, "wb") as f:
+                f.write(uploaded_file.getbuffer())
+
         progress_bar = st.progress(0)
         status_text = st.empty()
 
-        # 1. Ingest & Classify
-        status_text.text("Dokumente werden eingelesen und klassifiziert...")
-        classified_docs = []
-        
-        for i, uploaded_file in enumerate(uploaded_files):
-            file_path = os.path.join(case_dir, uploaded_file.name)
-            with open(file_path, "wb") as f:
-                f.write(uploaded_file.getbuffer())
-            
-            text = extract_text_from_file(file_path)
-            cls_result = classify_document(uploaded_file.name, text)
-            
-            if cls_result['doc_type'] == 'unknown_please_rename':
-                st.error(f"⚠️ Dokument '{uploaded_file.name}' konnte nicht identifiziert werden. Bitte benennen Sie es um (z.B. 'reisepass', 'antrag', 'mietvertrag').")
-            
-            doc_info = {
-                "filename": uploaded_file.name,
-                "text": text,
-                **cls_result
-            }
-            classified_docs.append(doc_info)
-            progress_bar.progress((i + 1) / len(uploaded_files) * 0.3)
+        def update_progress(fraction, message):
+            progress_bar.progress(fraction)
+            status_text.text(message)
 
-        # 2. Checklist
-        status_text.text("Checkliste wird geprüft...")
-        missing_docs = check_documents(selected_case_code, classified_docs, case_details)
-        progress_bar.progress(0.5)
+        final_report, applicant_name = analyze_case_documents(
+            temp_case_dir,
+            [uploaded_file.name for uploaded_file in uploaded_files],
+            analysis_goal,
+            progress_callback=update_progress,
+        )
 
-        # 3. Extraction & Consistency
-        status_text.text("Daten werden extrahiert und geprüft...")
-        extracted_data = []
-        applicant_name = "Unbekannt"
-        
-        for doc in classified_docs:
-            fields = extract_fields_llm(doc['text'], doc['doc_type'])
-            doc.update(fields)
-            extracted_data.append(doc)
-            
-            # Try to find applicant name
-            if applicant_name == "Unbekannt" and 'full_name' in fields:
-                applicant_name = normalize_name(fields['full_name'])
-        
-        # Create Case ID with name if found
-        if applicant_name != "Unbekannt":
-            # Sanitize name for folder usage
-            safe_name = "".join([c for c in applicant_name if c.isalnum() or c in (' ', '_')]).strip().replace(' ', '_')
-            new_case_id = f"Case_{safe_name}"
-            
-            # Rename folder
-            new_case_dir = os.path.join("cases", new_case_id)
-            
-            # If case already exists, add timestamp to differentiate
-            if os.path.exists(new_case_dir):
-                from datetime import datetime
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                new_case_id = f"Case_{safe_name}_{timestamp}"
-                new_case_dir = os.path.join("cases", new_case_id)
-            
-            try:
-                os.rename(case_dir, new_case_dir)
-                case_id = new_case_id
-                case_dir = new_case_dir
-                st.success(f"✅ Neue Akte erstellt: **{applicant_name}** (ID: {case_id})")
-            except Exception as e:
-                st.warning(f"Konnte Fallordner nicht umbenennen: {e}")
-        else:
-            st.warning("⚠️ Konnte keinen Namen aus den Dokumenten extrahieren. Akte wird mit ID 'case_temp' erstellt.")
+        applicant_name = normalize_name(applicant_name)
+        case_id = build_case_id(applicant_name)
+        case_dir = os.path.join("cases", case_id)
+        os.rename(temp_case_dir, case_dir)
 
-        flags = check_consistency(extracted_data)
-        progress_bar.progress(0.7)
-
-        # 4. Report Generation (LLM)
-        status_text.text("Bericht und Fragen werden generiert...")
-        report_data = {
-            "case_type": case_type_map[selected_case_code],
-            "documents": classified_docs,
-            "missing_documents": missing_docs,
-            "flags": flags
-        }
-        
-        final_report = generate_final_report(report_data)
-        progress_bar.progress(1.0)
-        status_text.text("Analyse abgeschlossen.")
-
-        # Save case metadata
-        case_status = "Vollständig" if not missing_docs else "Unvollständig"
-        
+        json_path, txt_path = save_report(case_id, final_report)
         case_metadata = {
-            'case_id': case_id,
-            'applicant_name': applicant_name,
-            'case_type': case_type_map[selected_case_code],
-            'case_type_code': selected_case_code,
-            'status': case_status,
-            'missing_documents': missing_docs,
-            'document_count': len(classified_docs),
-            'case_details': case_details
+            "case_id": case_id,
+            "applicant_name": applicant_name,
+            "case_type": f"Zielanalyse: {analysis_goal}",
+            "case_type_code": "timeline",
+            "analysis_goal": analysis_goal,
+            "status": "Analysiert",
+            "missing_documents": [],
+            "document_count": len(uploaded_files),
+            "timeline_entry_count": len(final_report.get("timeline_entries", [])),
+            "case_details": {"analysis_goal": analysis_goal},
         }
-        
         save_case_metadata(case_id, case_metadata)
-        
-        # Store in session state for navigation
-        st.session_state['current_case_id'] = case_id
-        st.session_state['analysis_complete'] = True
 
-        # Display Results
+        st.session_state["current_case_id"] = case_id
+        st.session_state["selected_case_id"] = case_id
+        st.success(f"Neue Akte erstellt: {applicant_name} (ID: {case_id})")
+
         st.divider()
-        
-        tab1, tab2, tab3, tab4, tab5 = st.tabs(["Übersicht", "Dokumente", "Analyse", "Fragen", "Aktennotiz"])
-        
-        with tab1:
-            st.subheader("Status der Unterlagen")
-            
-            # Get the full list of requirements again to build a complete table
-            checklist_data = load_checklist(selected_case_code)
-            all_requirements = checklist_data.get('required_docs', []) if checklist_data else []
-            
-            # Determine which are present
-            present_docs = {d['doc_type']: d for d in classified_docs}
-            
-            status_data = []
-            for req in all_requirements:
-                is_present = req in present_docs
-                doc_data = present_docs[req] if is_present else {}
-                
-                # Format extracted info for the table
-                extracted_info_str = ""
-                if is_present:
-                    # Filter out internal keys to show only relevant extracted fields
-                    ignored_keys = ['filename', 'text', 'doc_type', 'confidence', 'evidence_snippet', 'dates_found']
-                    info_items = [f"{k}: {v}" for k, v in doc_data.items() if k not in ignored_keys and v]
-                    extracted_info_str = ", ".join(info_items)
+        display_timeline_report(final_report, case_id=case_id, txt_path=txt_path, json_path=json_path)
 
-                status_data.append({
-                    "Dokumententyp": req,
-                    "Status": "✅ Vorhanden" if is_present else "❌ Fehlt",
-                    "Extrahierte Info": extracted_info_str if extracted_info_str else "-",
-                    "Hinweis": "Gefunden" if is_present else "Erforderlich"
-                })
-            
-            # Also add any extra documents that were uploaded but not strictly required
-            for doc in classified_docs:
-                if doc['doc_type'] not in all_requirements:
-                    # Filter out internal keys
-                    ignored_keys = ['filename', 'text', 'doc_type', 'confidence', 'evidence_snippet', 'dates_found']
-                    info_items = [f"{k}: {v}" for k, v in doc.items() if k not in ignored_keys and v]
-                    extracted_info_str = ", ".join(info_items)
-                    
-                    status_data.append({
-                        "Dokumententyp": doc['doc_type'],
-                        "Status": "ℹ️ Zusätzlich",
-                        "Extrahierte Info": extracted_info_str if extracted_info_str else "-",
-                        "Hinweis": "Zusätzlich hochgeladen"
-                    })
 
-            if status_data:
-                st.dataframe(pd.DataFrame(status_data), use_container_width=True)
-            else:
-                st.info("Keine spezifische Checkliste für diesen Falltyp verfügbar.")
-
-        with tab2:
-            st.subheader("Details der Dokumente")
-            
-            # Create a clean DataFrame for the documents tab
-            docs_table_data = []
-            for doc in final_report['documents']:
-                # Flatten the dict for the table
-                row = {
-                    "Dateiname": doc['filename'],
-                    "Typ": doc['doc_type'],
-                    "Konfidenz": f"{doc['confidence']:.2f}",
-                }
-                # Add extracted fields dynamically
-                ignored_keys = ['filename', 'text', 'doc_type', 'confidence', 'evidence_snippet', 'dates_found']
-                for k, v in doc.items():
-                    if k not in ignored_keys:
-                        row[k] = v
-                docs_table_data.append(row)
-            
-            if docs_table_data:
-                st.dataframe(pd.DataFrame(docs_table_data), use_container_width=True)
-            
-            st.divider()
-            st.caption("Dokumentenansicht")
-            for doc in final_report['documents']:
-                with st.expander(f"📄 {doc['filename']} ({doc['doc_type']})"):
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        st.markdown("**Metadaten (JSON):**")
-                        st.json({k:v for k,v in doc.items() if k != 'text'})
-                    
-                    with col2:
-                        st.markdown("**Inhalt:**")
-                        text_content = doc.get('text', '')
-                        
-                        # Check for Form Data
-                        if "--- FORM DATA START ---" in text_content:
-                            try:
-                                start = text_content.find("--- FORM DATA START ---") + len("--- FORM DATA START ---")
-                                end = text_content.find("--- FORM DATA END ---")
-                                form_data_str = text_content[start:end].strip()
-                                form_lines = form_data_str.split('\n')
-                                form_dict = {}
-                                for line in form_lines:
-                                    if ": " in line:
-                                        k, v = line.split(": ", 1)
-                                        form_dict[k.strip()] = v.strip()
-                                
-                                st.info("📝 **Erkannte Formulardaten:**")
-                                st.table(pd.DataFrame(list(form_dict.items()), columns=["Feld", "Wert"]))
-                            except:
-                                pass
-                        
-                        st.text_area("Rohdaten (Text)", text_content, height=200)
-
-        with tab3:
-            st.subheader("🔍 Datenabgleich")
-            
-            # 1. Consistency Flags
-            st.markdown("#### 🚩 Auffälligkeiten / Hinweise")
-            if final_report['flags']:
-                for f in final_report['flags']:
-                    st.error(f"**{f['code']}**: {f['reason']}")
-            else:
-                st.success("Keine Auffälligkeiten gefunden.")
-            
-            st.divider()
-
-            # 2. Passport vs Application Form Comparison
-            st.markdown("#### 🛂 Abgleich: Reisepass vs. Antrag")
-            
-            passport_doc = next((d for d in classified_docs if d['doc_type'] == 'passport'), None)
-            app_form_doc = next((d for d in classified_docs if d['doc_type'] == 'application_form'), None)
-            
-            if passport_doc and app_form_doc:
-                comparison_data = []
-                fields_to_compare = [
-                    ("Vollständiger Name", "full_name"),
-                    ("Geburtsdatum", "date_of_birth"),
-                    ("Staatsangehörigkeit", "nationality"),
-                    ("Passnummer", "passport_number")
-                ]
-                
-                for label, key in fields_to_compare:
-                    pass_val = passport_doc.get(key, None)
-                    form_val = app_form_doc.get(key, None)
-                    
-                    # Convert None to empty string for cleaner display
-                    if pass_val is None or pass_val == "null":
-                        pass_val = ""
-                    if form_val is None or form_val == "null":
-                        form_val = ""
-                    
-                    # Normalize Passport Value (handle dict if present)
-                    if isinstance(pass_val, dict):
-                        # Convert {'surname': 'X', 'given_names': 'Y'} to string
-                        s = pass_val.get('surname', '')
-                        g = pass_val.get('given_names', '')
-                        pass_val = f"{s}, {g}".strip(', ')
-                    
-                    # Normalize Form Value
-                    if isinstance(form_val, dict):
-                        s = form_val.get('surname', '')
-                        g = form_val.get('given_names', '')
-                        form_val = f"{s}, {g}".strip(', ')
-
-                    # Simple normalization for comparison
-                    match = "✅ OK"
-                    
-                    p_str = str(pass_val).lower().strip()
-                    f_str = str(form_val).lower().strip()
-                    
-                    # Check if either value is missing/empty
-                    if not p_str and not f_str:
-                        match = "⚠️ Beide fehlen"
-                        pass_val = "(leer)"
-                        form_val = "(leer)"
-                    elif not p_str:
-                        match = "⚠️ Pass fehlt"
-                        pass_val = "(leer)"
-                    elif not f_str:
-                        match = "⚠️ Antrag fehlt"
-                        form_val = "(leer)"
-                    elif p_str != f_str:
-                        # Fuzzy check for names (order swap)
-                        if key == "full_name" and (p_str.replace(',', '') == f_str.replace(',', '') or 
-                                                 p_str.split(',')[0] in f_str):
-                             match = "✅ OK (Ähnlich)"
-                        else:
-                            match = "❌ Abweichung"
-                    
-                    comparison_data.append({
-                        "Feld": label,
-                        "Wert im Pass": pass_val,
-                        "Wert im Antrag": form_val,
-                        "Status": match
-                    })
-                
-                st.table(pd.DataFrame(comparison_data))
-            else:
-                st.warning("Für den Abgleich werden Reisepass und Antrag benötigt.")
-
-        with tab4:
-            st.subheader("Offene Fragen")
-            for q in final_report.get('questions_for_applicant', []):
-                st.info(f"❓ {q.get('question')}")
-                st.caption(f"Grund: {q.get('reason')}")
-
-        with tab5:
-            st.subheader("Entwurf Aktennotiz")
-            note = final_report.get('aktennotiz_de', 'Keine Notiz generiert.')
-            st.text_area("Bearbeitbare Notiz", value=note, height=300)
-            
-            json_path, txt_path = save_report(case_id, final_report)
-            
-            with open(txt_path, "r") as f:
-                st.download_button("Notiz herunterladen (.txt)", f, file_name=f"case_{case_id}_note.txt")
-            
-            with open(json_path, "r") as f:
-                st.download_button("Bericht herunterladen (.json)", f, file_name=f"case_{case_id}_report.json")
-
-# Sidebar Utils
 st.sidebar.divider()
 if st.sidebar.button("Wissensdatenbank neu aufbauen"):
+    from abh_assist.rag.index import build_index
+
     build_index()
     st.sidebar.success("Index neu aufgebaut.")

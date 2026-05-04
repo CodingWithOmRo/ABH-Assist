@@ -57,7 +57,7 @@ def get_model():
             return None
     return _model_instance
 
-def run_llm(prompt, stop=None):
+def run_llm(prompt, stop=None, max_tokens=1024):
     """
     Unified function to run LLM either via local library or server.
     """
@@ -68,7 +68,7 @@ def run_llm(prompt, stop=None):
             
         output = llm(
             prompt,
-            max_tokens=1024,
+            max_tokens=max_tokens,
             stop=stop or ["User:", "\n\n"],
             temperature=config['temperature'],
             top_p=config['top_p'],
@@ -82,7 +82,7 @@ def run_llm(prompt, stop=None):
         url = f"{config['server_url']}/completions"
         payload = {
             "prompt": prompt,
-            "max_tokens": 1024,
+            "max_tokens": max_tokens,
             "temperature": config['temperature'],
             "stop": stop or ["User:", "\n\n"]
         }
