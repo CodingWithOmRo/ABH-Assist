@@ -57,6 +57,18 @@ def _write_timeline_report(file_obj, report_data):
         note = json.dumps(note, ensure_ascii=False)
     file_obj.write(str(note))
 
+    summary = report_data.get("timeline_summary", {})
+    if summary:
+        file_obj.write("\n\nAUSWERTUNGSUEBERSICHT:\n")
+        file_obj.write(f"- Eintraege: {summary.get('entry_count', 0)}\n")
+        file_obj.write(f"- Dokumente: {summary.get('document_count', 0)}\n")
+        file_obj.write(f"- Dokumente mit Treffern: {summary.get('documents_with_entries', 0)}\n")
+        file_obj.write(f"- Niedrige Konfidenz: {summary.get('low_confidence_count', 0)}\n")
+        start = summary.get("date_range", {}).get("start")
+        end = summary.get("date_range", {}).get("end")
+        if start or end:
+            file_obj.write(f"- Zeitraum: {start or '?'} bis {end or '?'}\n")
+
     file_obj.write("\n\nCHRONOLOGIE:\n")
     for entry in report_data.get("timeline_entries", []):
         date = entry.get("date") or "Unbekannt"
@@ -64,9 +76,13 @@ def _write_timeline_report(file_obj, report_data):
         source = entry.get("source_document") or ""
         page = entry.get("source_page_or_section") or ""
         relevance = entry.get("relevance") or ""
+        event_scope = entry.get("event_scope") or "unclear"
         file_obj.write(f"- {date}: {event}\n")
+        file_obj.write(f"  Bereich: {event_scope}\n")
         file_obj.write(f"  Dienlichkeit: {relevance}\n")
         file_obj.write(f"  Quelle: {source} {page}\n")
+        file_obj.write(f"  Datumsbasis: {entry.get('date_basis', 'unknown')}\n")
+        file_obj.write(f"  Methode: {entry.get('extraction_method', 'unknown')}\n")
 
     notes = report_data.get("coverage_notes", [])
     if notes:

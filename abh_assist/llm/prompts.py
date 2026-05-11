@@ -139,22 +139,31 @@ Eintraege, Entscheidungen, Schreiben, Dokumente und Ereignisse, die fuer dieses
 Ziel dienlich sein koennen.
 
 Wichtige Arbeitsregel:
+- Verwende AUSSCHLIESSLICH Informationen aus DIESEM Textauszug.
+- Verwende KEINE Informationen aus frueheren Dokumenten, frueheren Runs oder allgemeinem Fachwissen.
+- Das Analyseziel beeinflusst nur die Frage der Dienlichkeit, NICHT die Tatsachenbeschreibung.
+- Erfinde keine Ereignisse, keine Verfahrensschritte und keine Datumsangaben.
+- Wenn ein Jahr oder Datum im Auszug nicht belegt ist, gib es nicht aus.
+- Jede Ausgabe braucht eine kurze, exakt aus dem Auszug uebernommene Fundstelle in "evidence_snippet".
+- Wenn du keine kurze exakte Fundstelle zitieren kannst, gib den Eintrag NICHT aus.
 - Nichts Relevantes soll fehlen. Nimm im Zweifel einen Eintrag auf.
 - Lieber zu viele Eintraege als zu wenige.
 - Auch mittelbar relevante Daten aufnehmen, z.B. Aufenthaltstitel, Duldungen,
   Straftaten, Urteile, Haft, Entlassung, Ausreiseaufforderungen, Abschiebung,
   Identitaetsklaerung, Passbeschaffung, Fristen, Mitwirkung, Adresse,
   Familienstand, Erwerbstaetigkeit, Sozialleistungen, Krankheit, Schriftverkehr.
+- Trenne historische Ereignisse im Herkunftsland von Verwaltungsvorgaengen in Deutschland.
 - Keine rechtliche Entscheidung treffen.
 - Jede Aufnahme braucht eine Datumsangabe. Wenn nur Monat/Jahr oder Jahr genannt
   ist, nutze diese Angabe und setze die passende date_precision.
 - Wenn ein relevanter undatierter Eintrag direkt zu einem datierten Dokument
   gehoert, verwende das Dokumentdatum und erklaere dies in "date_basis".
-- Zitiere nur kurze Fundstellen aus dem Auszug.
+- Zitiere nur kurze Fundstellen wortnah aus dem Auszug.
 
 Dokument: {filename}
 Dokumenttyp: {doc_type}
 Auszug: {chunk_number}/{total_chunks}
+Seitenbereich: {page_scope}
 
 Textauszug:
 {text_snippet}
@@ -168,10 +177,11 @@ Return ONLY valid JSON:
       "date_basis": "Ereignisdatum, Dokumentdatum, Fristdatum, inferred_from_document_date, or unknown",
       "event": "Kurzer deutscher Satz: Was ist passiert?",
       "relevance": "Warum kann dies fuer das Ziel dienlich sein?",
-      "category": "Aufenthalt|Duldung|Straftat|Urteil|Haft|Ausreise|Abschiebung|Identitaet|Mitwirkung|Familie|Gesundheit|Arbeit|Sozialleistungen|Kommunikation|Frist|Sonstiges",
+      "category": "Asylverfahren|Herkunft/Flucht|Aufenthalt|Duldung|Straftat|Urteil|Haft|Ausreise|Abschiebung|Identitaet|Mitwirkung|Familie|Gesundheit|Arbeit|Sozialleistungen|Kommunikation|Frist|Sonstiges",
+      "event_scope": "historical_origin|germany_administrative|germany_judicial|personal_context|unclear",
       "source_document": "{filename}",
       "source_page_or_section": "Seite/Abschnitt/Fundstelle falls erkennbar, sonst null",
-      "evidence_snippet": "Kurzes woertliches Zitat oder sehr nahe Fundstelle",
+      "evidence_snippet": "Kurzes EXAKTES Zitat aus dem Auszug",
       "confidence": 0.0
     }}
   ]
@@ -186,6 +196,9 @@ Ziel:
 
 Chronologische Eintraege:
 {timeline_json}
+
+Zusammenfassung der Auswertung:
+{timeline_summary_json}
 
 Hinweise zur Abdeckung:
 {coverage_notes_json}

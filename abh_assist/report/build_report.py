@@ -53,19 +53,26 @@ def generate_timeline_report(case_data):
             "event": entry.get("event"),
             "relevance": entry.get("relevance"),
             "category": entry.get("category"),
+            "event_scope": entry.get("event_scope"),
             "source_document": entry.get("source_document"),
             "source_page_or_section": entry.get("source_page_or_section"),
             "confidence": entry.get("confidence"),
         }
-        for entry in entries[:120]
+        for entry in entries[:25]
     ]
-    prompt = TIMELINE_CASE_NOTE_PROMPT.format(
-        goal=case_data.get("analysis_goal", ""),
-        timeline_json=json.dumps(compact_entries, ensure_ascii=False),
-        coverage_notes_json=json.dumps(case_data.get("coverage_notes", []), ensure_ascii=False),
-    )
-    response = run_llm(prompt, stop=["User:", "</s>"], max_tokens=2048)
-    note_json = validate_and_fix_json(response)
+    try:
+        prompt = TIMELINE_CASE_NOTE_PROMPT.format(
+            goal=case_data.get("analysis_goal", ""),
+            timeline_json=json.dumps(compact_entries, ensure_ascii=False),
+            timeline_summary_json=json.dumps(case_data.get("timeline_summary", {}), ensure_ascii=False),
+            coverage_notes_json=json.dumps(case_data.get("coverage_notes", []), ensure_ascii=False),
+        )
+        response = run_llm(prompt, stop=["User:", "</s>"], max_tokens=512)
+        note_json = validate_and_fix_json(response)
+    except Exception as exc:
+        print(f"Timeline note generation warning: {exc}")
+        note_json = None
+
     if note_json:
         case_data["aktennotiz_de"] = note_json.get("aktennotiz", "")
     else:
@@ -80,8 +87,17 @@ def generate_timeline_report(case_data):
 def build_fallback_timeline_note(case_data):
     goal = case_data.get("analysis_goal", "Nicht angegeben")
     count = len(case_data.get("timeline_entries", []))
+    summary = case_data.get("timeline_summary", {})
+    documents = summary.get("documents_with_entries", 0)
+    total_documents = summary.get("document_count", 0)
+    date_range = summary.get("date_range", {})
+    date_span = ""
+    if date_range.get("start") and date_range.get("end"):
+        date_span = f" Der abgedeckte Zeitraum reicht von {date_range['start']} bis {date_range['end']}."
     return (
         f"Zielbezogene Aktenauswertung zum Ziel '{goal}'. "
         f"Es wurden {count} datierte Eintraege identifiziert und chronologisch geordnet. "
+        f"Dabei wurden {documents} von {total_documents} Dokumenten mit mindestens einem Treffer abgedeckt."
+        f"{date_span}"
         "Die Liste ist bewusst weit gefasst; niedrig konfidente Eintraege sind anhand der Fundstellen zu pruefen."
     )

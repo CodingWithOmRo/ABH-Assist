@@ -3,9 +3,7 @@ Akte Details: zielbezogene Chronologie einer digitalen Akte.
 """
 import json
 import os
-from datetime import datetime
 
-import pandas as pd
 import streamlit as st
 
 from abh_assist.case import (
@@ -15,8 +13,8 @@ from abh_assist.case import (
     save_case_metadata,
     update_case_status,
 )
-from abh_assist.extract.timeline import timeline_entries_to_rows
 from abh_assist.report.export import save_report
+from abh_assist.ui import display_timeline_report
 
 
 st.set_page_config(page_title="Akte Details", layout="wide", page_icon="📄")
@@ -36,6 +34,18 @@ def current_goal(metadata):
         or metadata.get("case_details", {}).get("analysis_goal")
         or "Aufenthaltsbeendigung"
     )
+
+
+def normalize_status(value):
+    mapping = {
+        "In Prüfung": "In Pruefung",
+        "In PrÃ¼fung": "In Pruefung",
+        "Unvollständig": "Unvollstaendig",
+        "UnvollstÃ¤ndig": "Unvollstaendig",
+        "Vollständig": "Vollstaendig",
+        "VollstÃ¤ndig": "Vollstaendig",
+    }
+    return mapping.get(value, value or "Unbekannt")
 
 
 def run_analysis(case_id, metadata, goal):
@@ -61,6 +71,8 @@ def run_analysis(case_id, metadata, goal):
     )
     save_report(case_id, final_report)
 
+    timeline_summary = final_report.get("timeline_summary", {})
+    date_range = timeline_summary.get("date_range", {})
     metadata.update(
         {
             "applicant_name": normalize_name(applicant_name),
@@ -71,174 +83,19 @@ def run_analysis(case_id, metadata, goal):
             "missing_documents": [],
             "document_count": len(docs),
             "timeline_entry_count": len(final_report.get("timeline_entries", [])),
-            "case_details": {"analysis_goal": goal},
+            "documents_with_entries": timeline_summary.get("documents_with_entries", 0),
+            "low_confidence_entry_count": timeline_summary.get("low_confidence_count", 0),
+            "date_range_start": date_range.get("start"),
+            "date_range_end": date_range.get("end"),
+            "case_details": {
+                "analysis_goal": goal,
+                "timeline_summary": timeline_summary,
+            },
         }
     )
     save_case_metadata(case_id, metadata)
     st.success("Analyse erfolgreich abgeschlossen.")
     st.rerun()
-
-
-def display_timeline_report(case_id, report_data):
-    entries = report_data.get("timeline_entries", [])
-    rows = timeline_entries_to_rows(entries)
-
-    tab1, tab2, tab3, tab4, tab5 = st.tabs(
-        ["Chronologie", "Dokumente", "Pruefhinweise", "Aktennotiz", "Interne Notizen"]
-    )
-
-    with tab1:
-        st.subheader("Chronologische zielrelevante Eintraege")
-        st.caption(f"Ziel: {report_data.get('analysis_goal', 'Nicht angegeben')}")
-        if rows:
-            timeline_df = pd.DataFrame(rows)
-            st.dataframe(timeline_df, use_container_width=True, hide_index=True)
-            st.download_button(
-                "Chronologie als CSV herunterladen",
-                data=timeline_df.to_csv(index=False, encoding="utf-8-sig"),
-                file_name=f"chronologie_{case_id}.csv",
-                mime="text/csv",
-            )
-        else:
-            st.warning("Es wurden keine datierten zielrelevanten Eintraege gefunden.")
-
-        st.divider()
-        for entry in entries:
-            title = f"{entry.get('date') or 'Unbekannt'} - {entry.get('event') or 'Eintrag'}"
-            with st.expander(title):
-                st.write(f"**Kategorie:** {entry.get('category', 'Sonstiges')}")
-                st.write(f"**Dienlichkeit:** {entry.get('relevance', '-')}")
-                st.write(
-                    f"**Quelle:** {entry.get('source_document', '-')} "
-                    f"{entry.get('source_page_or_section', '')}"
-                )
-                st.write(f"**Datumsbasis:** {entry.get('date_basis', '-')}")
-                st.write(f"**Konfidenz:** {float(entry.get('confidence', 0) or 0):.2f}")
-                if entry.get("evidence_snippet"):
-                    st.code(entry["evidence_snippet"])
-
-    with tab2:
-        st.subheader("Durchsuchte Dokumente")
-        summaries = {
-            item.get("filename"): item for item in report_data.get("document_summaries", [])
-        }
-        doc_rows = []
-        for doc in report_data.get("documents", []):
-            summary = summaries.get(doc.get("filename"), {})
-            doc_rows.append(
-                {
-                    "Dateiname": doc.get("filename"),
-                    "Typ": doc.get("doc_type"),
-                    "Konfidenz": f"{float(doc.get('confidence', 0) or 0):.2f}",
-                    "Textzeichen": summary.get("text_chars", len(doc.get("text", ""))),
-                    "Eintraege": summary.get("events_found", 0),
-                }
-            )
-
-        if doc_rows:
-            st.dataframe(pd.DataFrame(doc_rows), use_container_width=True, hide_index=True)
-
-        for doc in report_data.get("documents", []):
-            with st.expander(f"{doc.get('filename')} ({doc.get('doc_type')})"):
-                st.json({k: v for k, v in doc.items() if k != "text"})
-                st.text_area(
-                    "Extrahierter Text",
-                    value=doc.get("text", ""),
-                    height=240,
-                    key=f"text_{case_id}_{doc.get('filename')}",
-                )
-
-    with tab3:
-        st.subheader("Pruefhinweise zur Vollstaendigkeit")
-        notes = report_data.get("coverage_notes", [])
-        if notes:
-            for note in notes:
-                severity = note.get("severity", "LOW")
-                message = note.get("message", "")
-                documents = note.get("documents") or []
-                text = message if not documents else f"{message} Dokumente: {', '.join(documents)}"
-                if severity == "HIGH":
-                    st.error(text)
-                elif severity == "MEDIUM":
-                    st.warning(text)
-                else:
-                    st.info(text)
-        else:
-            st.success("Keine technischen Pruefhinweise.")
-
-        low_confidence = [entry for entry in entries if float(entry.get("confidence", 0) or 0) < 0.5]
-        if low_confidence:
-            st.markdown("#### Niedrig konfidente vorsorgliche Treffer")
-            st.dataframe(
-                pd.DataFrame(timeline_entries_to_rows(low_confidence)),
-                use_container_width=True,
-                hide_index=True,
-            )
-
-    with tab4:
-        st.subheader("Entwurf Aktennotiz")
-        st.text_area(
-            "Bearbeitbare Notiz",
-            value=report_data.get("aktennotiz_de", ""),
-            height=300,
-            key="note_edit",
-        )
-
-        st.markdown("#### Exporte")
-        txt_path = os.path.join("cases", case_id, f"case_{case_id}_note.txt")
-        json_path = os.path.join("cases", case_id, f"case_{case_id}_report.json")
-        col1, col2 = st.columns(2)
-        with col1:
-            if os.path.exists(txt_path):
-                with open(txt_path, "r", encoding="utf-8") as f:
-                    st.download_button("Aktennotiz (.txt)", f.read(), file_name=f"case_{case_id}_note.txt")
-        with col2:
-            if os.path.exists(json_path):
-                with open(json_path, "r", encoding="utf-8") as f:
-                    st.download_button("Bericht (.json)", f.read(), file_name=f"case_{case_id}_report.json")
-
-    with tab5:
-        display_internal_notes(case_id)
-
-
-def display_internal_notes(case_id):
-    st.subheader("Interne Notizen")
-    st.caption("Notizen sind nur fuer interne Zwecke und werden nicht in Berichten exportiert.")
-
-    notes_file = os.path.join("cases", case_id, "internal_notes.txt")
-    existing_notes = ""
-    if os.path.exists(notes_file):
-        with open(notes_file, "r", encoding="utf-8") as f:
-            existing_notes = f.read()
-
-    if existing_notes:
-        with st.expander("Bisherige Notizen anzeigen", expanded=False):
-            st.text_area("Verlauf", existing_notes, height=200, disabled=True, key="notes_history")
-
-    new_note = st.text_area(
-        "Neue Notiz",
-        height=150,
-        key="new_note_input",
-        placeholder="Interne Bemerkungen, Telefonnotizen, Erinnerungen...",
-    )
-
-    col1, col2 = st.columns(2)
-    with col1:
-        if st.button("Notiz speichern", type="primary", disabled=not new_note):
-            timestamp = datetime.now().strftime("%d.%m.%Y %H:%M")
-            formatted_note = f"[{timestamp}]\n{new_note}\n{'-' * 50}\n\n"
-            with open(notes_file, "a", encoding="utf-8") as f:
-                f.write(formatted_note)
-            st.success("Notiz gespeichert.")
-            st.rerun()
-
-    with col2:
-        if existing_notes:
-            st.download_button(
-                "Notizen herunterladen",
-                existing_notes,
-                file_name=f"notizen_{case_id}.txt",
-            )
 
 
 if "selected_case_id" not in st.session_state:
@@ -259,16 +116,23 @@ if not metadata:
 applicant_name = normalize_name(metadata.get("applicant_name", "Unbekannt"))
 goal = current_goal(metadata)
 docs = get_case_documents(case_id)
+date_range_start = metadata.get("date_range_start")
+date_range_end = metadata.get("date_range_end")
+date_span = (
+    f"{date_range_start} bis {date_range_end}"
+    if date_range_start and date_range_end
+    else (date_range_start or date_range_end or "Kein Zeitraum")
+)
 
-st.title(f"📄 Akte: {applicant_name}")
+st.title(f"Akte: {applicant_name}")
 st.caption(f"**Akte-ID:** `{case_id}`")
 
-if st.button("← Zurueck zur Uebersicht"):
+if st.button("Zurueck zur Uebersicht"):
     st.switch_page("pages/1_📁_Akten.py")
 
 st.divider()
 
-col1, col2, col3, col4 = st.columns(4)
+col1, col2, col3, col4, col5 = st.columns(5)
 with col1:
     st.metric("Name", applicant_name)
 with col2:
@@ -277,12 +141,19 @@ with col3:
     st.metric("Status", metadata.get("status", "Unbekannt"))
 with col4:
     st.metric("Dokumente", len(docs))
+with col5:
+    st.metric("Zeitraum", date_span)
+
+st.caption(
+    f"Trefferdokumente: {metadata.get('documents_with_entries', 0)} | "
+    f"Niedrige Konfidenz: {metadata.get('low_confidence_entry_count', 0)}"
+)
 
 st.divider()
 
 with st.expander("Status aktualisieren"):
-    statuses = ["Neu", "Analysiert", "In Prüfung", "Unvollständig", "Vollständig", "Abgeschlossen", "Unbekannt"]
-    current_status = metadata.get("status", "Unbekannt")
+    statuses = ["Neu", "Analysiert", "In Pruefung", "Unvollstaendig", "Vollstaendig", "Abgeschlossen", "Unbekannt"]
+    current_status = normalize_status(metadata.get("status", "Unbekannt"))
     new_status = st.selectbox(
         "Neuer Status",
         statuses,
@@ -307,8 +178,8 @@ with st.expander("Dokumente hinzufuegen oder Analyse neu erstellen", expanded=Fa
         for uploaded_file in add_files:
             file_path = os.path.join(case_dir, uploaded_file.name)
             if not os.path.exists(file_path):
-                with open(file_path, "wb") as f:
-                    f.write(uploaded_file.getbuffer())
+                with open(file_path, "wb") as file_obj:
+                    file_obj.write(uploaded_file.getbuffer())
                 uploaded_count += 1
         st.success(f"{uploaded_count} Dokument(e) hochgeladen.")
         st.rerun()
@@ -322,11 +193,19 @@ st.divider()
 report_path = os.path.join("cases", case_id, f"case_{case_id}_report.json")
 report_data = None
 if os.path.exists(report_path):
-    with open(report_path, "r", encoding="utf-8") as f:
-        report_data = json.load(f)
+    with open(report_path, "r", encoding="utf-8") as file_obj:
+        report_data = json.load(file_obj)
 
 if report_data and "timeline_entries" in report_data:
-    display_timeline_report(case_id, report_data)
+    txt_path = os.path.join("cases", case_id, f"case_{case_id}_note.txt")
+    json_path = os.path.join("cases", case_id, f"case_{case_id}_report.json")
+    display_timeline_report(
+        report_data,
+        case_id=case_id,
+        txt_path=txt_path,
+        json_path=json_path,
+        show_internal_notes=True,
+    )
 else:
     if report_data:
         st.warning(

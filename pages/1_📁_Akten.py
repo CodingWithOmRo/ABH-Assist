@@ -1,5 +1,5 @@
 """
-Akten-Übersicht für zielbezogene Chronologie-Auswertungen.
+Akten-Uebersicht fuer zielbezogene Chronologie-Auswertungen.
 """
 import os
 import shutil
@@ -10,7 +10,18 @@ import streamlit as st
 from abh_assist.case import get_case_documents, list_all_cases
 
 
-st.set_page_config(page_title="Akten-Übersicht", layout="wide", page_icon="📁")
+st.set_page_config(page_title="Akten-Uebersicht", layout="wide", page_icon="📁")
+
+
+STATUS_OPTIONS = [
+    "Neu",
+    "Analysiert",
+    "In Pruefung",
+    "Unvollstaendig",
+    "Vollstaendig",
+    "Abgeschlossen",
+    "Unbekannt",
+]
 
 
 def normalize_name(name_value):
@@ -21,8 +32,36 @@ def normalize_name(name_value):
     return str(name_value) if name_value else "Unbekannt"
 
 
+def normalize_status(value):
+    mapping = {
+        "In Prüfung": "In Pruefung",
+        "In PrÃ¼fung": "In Pruefung",
+        "Unvollständig": "Unvollstaendig",
+        "UnvollstÃ¤ndig": "Unvollstaendig",
+        "Vollständig": "Vollstaendig",
+        "VollstÃ¤ndig": "Vollstaendig",
+    }
+    return mapping.get(value, value or "Unbekannt")
+
+
 def case_goal(case):
-    return case.get("analysis_goal") or case.get("case_details", {}).get("analysis_goal") or case.get("case_type", "Nicht angegeben")
+    return (
+        case.get("analysis_goal")
+        or case.get("case_details", {}).get("analysis_goal")
+        or case.get("case_type", "Nicht angegeben")
+    )
+
+
+def case_date_span(case):
+    start = case.get("date_range_start")
+    end = case.get("date_range_end")
+    if start and end:
+        return f"{start} bis {end}"
+    if start:
+        return start
+    if end:
+        return end
+    return "Kein Zeitraum"
 
 
 def format_date(value):
@@ -34,10 +73,12 @@ def format_date(value):
         return value
 
 
-st.title("📁 Akten-Übersicht")
+st.title("Akten-Uebersicht")
 st.markdown("**Alle gespeicherten Akten und zielbezogenen Chronologien**")
 
 cases = list_all_cases()
+for case in cases:
+    case["status"] = normalize_status(case.get("status"))
 
 if not cases:
     st.info("Noch keine Akten vorhanden. Laden Sie Dokumente auf der Hauptseite hoch, um eine neue Akte zu erstellen.")
@@ -46,7 +87,7 @@ if not cases:
 total_cases = len(cases)
 new_cases = len([case for case in cases if case.get("status") == "Neu"])
 analyzed_cases = len([case for case in cases if case.get("status") == "Analysiert"])
-in_review_cases = len([case for case in cases if case.get("status") == "In Prüfung"])
+in_review_cases = len([case for case in cases if case.get("status") == "In Pruefung"])
 closed_cases = len([case for case in cases if case.get("status") == "Abgeschlossen"])
 
 col1, col2, col3, col4, col5 = st.columns(5)
@@ -57,14 +98,14 @@ with col2:
 with col3:
     st.metric("Analysiert", analyzed_cases)
 with col4:
-    st.metric("In Prüfung", in_review_cases)
+    st.metric("In Pruefung", in_review_cases)
 with col5:
     st.metric("Abgeschlossen", closed_cases)
 
 with st.expander("Erweiterte Statistiken"):
     stat_col1, stat_col2 = st.columns(2)
     with stat_col1:
-        st.markdown("**Häufigste Analyseziele:**")
+        st.markdown("**Haeufigste Analyseziele:**")
         goal_count = {}
         for case in cases:
             goal = case_goal(case)
@@ -83,9 +124,9 @@ with st.expander("Erweiterte Statistiken"):
         avg_entries = sum(case.get("timeline_entry_count", 0) for case in cases) / total_cases
         st.markdown("**Bearbeitungsstand:**")
         st.progress(completion_rate / 100)
-        st.write(f"{completion_rate:.1f}% mit Chronologie oder Prüfung")
+        st.write(f"{completion_rate:.1f}% mit Chronologie oder Pruefstatus")
         st.metric("Durchschn. Dokumente/Akte", f"{avg_docs:.1f}")
-        st.metric("Durchschn. Chronologie-Einträge", f"{avg_entries:.1f}")
+        st.metric("Durchschn. Chronologie-Eintraege", f"{avg_entries:.1f}")
 
 st.divider()
 
@@ -93,10 +134,7 @@ search_col, filter_col = st.columns([3, 1])
 with search_col:
     search_query = st.text_input("Suche nach Name, Akte-ID oder Ziel", "")
 with filter_col:
-    status_filter = st.selectbox(
-        "Status",
-        ["Alle", "Neu", "Analysiert", "In Prüfung", "Unvollständig", "Vollständig", "Abgeschlossen", "Unbekannt"],
-    )
+    status_filter = st.selectbox("Status", ["Alle", *STATUS_OPTIONS])
 
 filtered_cases = cases
 if search_query:
@@ -121,20 +159,20 @@ if filtered_cases:
     with st.expander("Massenaktionen"):
         bulk_col1, bulk_col2, bulk_col3 = st.columns([2, 1, 1])
         with bulk_col1:
-            select_all = st.checkbox("Alle gefilterten Akten auswählen", key="select_all_cases")
+            select_all = st.checkbox("Alle gefilterten Akten auswaehlen", key="select_all_cases")
         if select_all:
             st.session_state.selected_cases = [case["case_id"] for case in filtered_cases]
         with bulk_col2:
-            if st.button("Ausgewählte löschen", disabled=not st.session_state.selected_cases):
+            if st.button("Ausgewaehlte loeschen", disabled=not st.session_state.selected_cases):
                 st.session_state.bulk_delete_confirm = True
         with bulk_col3:
-            st.write(f"{len(st.session_state.selected_cases)} ausgewählt")
+            st.write(f"{len(st.session_state.selected_cases)} ausgewaehlt")
 
         if st.session_state.get("bulk_delete_confirm", False):
-            st.warning(f"{len(st.session_state.selected_cases)} Akte(n) wirklich löschen?")
+            st.warning(f"{len(st.session_state.selected_cases)} Akte(n) wirklich loeschen?")
             yes_col, no_col = st.columns(2)
             with yes_col:
-                if st.button("Ja, löschen", type="primary"):
+                if st.button("Ja, loeschen", type="primary"):
                     for selected_case_id in st.session_state.selected_cases:
                         case_dir = os.path.join("cases", selected_case_id)
                         if os.path.exists(case_dir):
@@ -150,13 +188,13 @@ if filtered_cases:
 st.divider()
 
 status_icons = {
-    "Neu": "🆕",
-    "Analysiert": "✅",
-    "In Prüfung": "🔎",
-    "Unvollständig": "⚠️",
-    "Vollständig": "✅",
-    "Abgeschlossen": "✔️",
-    "Unbekannt": "❓",
+    "Neu": "Neu",
+    "Analysiert": "OK",
+    "In Pruefung": "Pruefung",
+    "Unvollstaendig": "Warnung",
+    "Vollstaendig": "OK",
+    "Abgeschlossen": "Fertig",
+    "Unbekannt": "?",
 }
 
 for case in filtered_cases:
@@ -165,12 +203,13 @@ for case in filtered_cases:
     docs = get_case_documents(case_id)
 
     with st.container():
-        check_col, name_col, goal_col, date_col, status_col, delete_col = st.columns([0.3, 2.4, 2.4, 1.4, 1.2, 0.5])
+        columns = st.columns([0.3, 2.2, 2.7, 1.6, 1.2, 0.6])
+        check_col, name_col, goal_col, date_col, status_col, delete_col = columns
 
         with check_col:
             checked = case_id in st.session_state.selected_cases
             if st.checkbox(
-                f"Akte {applicant_name} auswählen",
+                f"Akte {applicant_name} auswaehlen",
                 value=checked,
                 key=f"check_{case_id}",
                 label_visibility="collapsed",
@@ -188,24 +227,32 @@ for case in filtered_cases:
 
         with goal_col:
             st.write(f"**Ziel:** {case_goal(case)}")
-            st.caption(f"{case.get('timeline_entry_count', 0)} Chronologie-Einträge")
+            st.caption(
+                f"{case.get('timeline_entry_count', 0)} Eintraege | "
+                f"Zeitraum: {case_date_span(case)}"
+            )
 
         with date_col:
             st.write(f"**Erstellt:** {format_date(case.get('created_date'))}")
+            st.caption(
+                f"Trefferdokumente: {case.get('documents_with_entries', 0)}/"
+                f"{case.get('document_count', len(docs))}"
+            )
 
         with status_col:
             status = case.get("status", "Unbekannt")
-            st.write(f"{status_icons.get(status, '❓')} {status}")
+            st.write(f"{status_icons.get(status, '?')} {status}")
+            st.caption(f"Niedrige Konfidenz: {case.get('low_confidence_entry_count', 0)}")
 
         with delete_col:
-            if st.button("🗑️", key=f"delete_{case_id}", help="Akte löschen"):
+            if st.button("Loeschen", key=f"delete_{case_id}", help="Akte loeschen"):
                 st.session_state[f"confirm_delete_{case_id}"] = True
 
         if st.session_state.get(f"confirm_delete_{case_id}", False):
-            st.warning(f"Akte '{applicant_name}' (ID: {case_id}) wirklich löschen?")
+            st.warning(f"Akte '{applicant_name}' (ID: {case_id}) wirklich loeschen?")
             yes_col, no_col = st.columns(2)
             with yes_col:
-                if st.button("Ja, löschen", key=f"confirm_yes_{case_id}"):
+                if st.button("Ja, loeschen", key=f"confirm_yes_{case_id}"):
                     case_path = os.path.join("cases", case_id)
                     if os.path.exists(case_path):
                         shutil.rmtree(case_path)
@@ -219,7 +266,8 @@ for case in filtered_cases:
         with st.expander("Details anzeigen"):
             st.write(f"**Analyseziel:** {case_goal(case)}")
             st.write(f"**Anzahl Dokumente:** {len(docs)}")
-            st.write(f"**Chronologie-Einträge:** {case.get('timeline_entry_count', 0)}")
+            st.write(f"**Chronologie-Eintraege:** {case.get('timeline_entry_count', 0)}")
+            st.write(f"**Zeitraum:** {case_date_span(case)}")
             if docs:
                 st.write("**Hochgeladene Dokumente:**")
                 for doc in docs:
@@ -232,4 +280,4 @@ if st.sidebar.button("Aktualisieren"):
     st.rerun()
 
 st.sidebar.divider()
-st.sidebar.info("Tipp: Klicken Sie auf einen Namen, um die vollständige Akte anzuzeigen.")
+st.sidebar.info("Tipp: Klicken Sie auf einen Namen, um die vollstaendige Akte anzuzeigen.")

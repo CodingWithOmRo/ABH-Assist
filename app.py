@@ -2,22 +2,21 @@ import os
 import shutil
 from datetime import datetime
 
-import pandas as pd
 import streamlit as st
 
 from abh_assist.case import analyze_case_documents, save_case_metadata
-from abh_assist.extract.timeline import timeline_entries_to_rows
 from abh_assist.report.export import save_report
+from abh_assist.ui import display_timeline_report
 
 
-st.set_page_config(page_title="ABH-Assist", page_icon="🏛️", layout="wide")
+st.set_page_config(page_title="ABH-Assist", page_icon="📂", layout="wide")
 
 
 GOAL_PRESETS = [
     "Aufenthaltsbeendigung",
-    "Identitätsklärung",
-    "Widerruf oder Rücknahme eines Aufenthaltstitels",
-    "Prüfung Duldung",
+    "Identitaetsklaerung",
+    "Widerruf oder Ruecknahme eines Aufenthaltstitels",
+    "Pruefung Duldung",
     "Benutzerdefiniertes Ziel",
 ]
 
@@ -64,146 +63,21 @@ def get_analysis_goal():
 
     st.sidebar.caption(
         "Die Auswertung ist bewusst weit gefasst: Im Zweifel werden Eintraege aufgenommen, "
-        "damit nichts Dienliches fehlt."
+        "damit fuer die weitere Bearbeitung nichts Dienliches fehlt."
     )
     return goal.strip() or "Aufenthaltsbeendigung"
 
 
-def display_timeline_report(final_report, case_id=None, txt_path=None, json_path=None):
-    entries = final_report.get("timeline_entries", [])
-    rows = timeline_entries_to_rows(entries)
-
-    tab1, tab2, tab3, tab4 = st.tabs(["Chronologie", "Dokumente", "Pruefhinweise", "Aktennotiz"])
-
-    with tab1:
-        st.subheader("Chronologische zielrelevante Eintraege")
-        st.caption(f"Ziel: {final_report.get('analysis_goal', 'Nicht angegeben')}")
-        if rows:
-            timeline_df = pd.DataFrame(rows)
-            st.dataframe(timeline_df, use_container_width=True, hide_index=True)
-            csv_data = timeline_df.to_csv(index=False, encoding="utf-8-sig")
-            st.download_button(
-                "Chronologie als CSV herunterladen",
-                data=csv_data,
-                file_name=f"chronologie_{case_id or 'akte'}.csv",
-                mime="text/csv",
-            )
-        else:
-            st.warning("Es wurden keine datierten zielrelevanten Eintraege gefunden.")
-
-        st.divider()
-        for entry in entries:
-            title = f"{entry.get('date') or 'Unbekannt'} - {entry.get('event') or 'Eintrag'}"
-            with st.expander(title):
-                st.write(f"**Kategorie:** {entry.get('category', 'Sonstiges')}")
-                st.write(f"**Dienlichkeit:** {entry.get('relevance', '-')}")
-                st.write(
-                    f"**Quelle:** {entry.get('source_document', '-')} "
-                    f"{entry.get('source_page_or_section', '')}"
-                )
-                st.write(f"**Datumsbasis:** {entry.get('date_basis', '-')}")
-                st.write(f"**Konfidenz:** {float(entry.get('confidence', 0) or 0):.2f}")
-                if entry.get("evidence_snippet"):
-                    st.code(entry["evidence_snippet"])
-
-    with tab2:
-        st.subheader("Durchsuchte Dokumente")
-        doc_rows = []
-        for doc in final_report.get("documents", []):
-            summary = next(
-                (
-                    item
-                    for item in final_report.get("document_summaries", [])
-                    if item.get("filename") == doc.get("filename")
-                ),
-                {},
-            )
-            doc_rows.append(
-                {
-                    "Dateiname": doc.get("filename"),
-                    "Typ": doc.get("doc_type"),
-                    "Konfidenz": f"{doc.get('confidence', 0):.2f}",
-                    "Textzeichen": summary.get("text_chars", len(doc.get("text", ""))),
-                    "Eintraege": summary.get("events_found", 0),
-                }
-            )
-
-        if doc_rows:
-            st.dataframe(pd.DataFrame(doc_rows), use_container_width=True, hide_index=True)
-
-        for doc in final_report.get("documents", []):
-            with st.expander(f"{doc.get('filename')} ({doc.get('doc_type')})"):
-                st.json({k: v for k, v in doc.items() if k != "text"})
-                st.text_area(
-                    "Extrahierter Text",
-                    value=doc.get("text", ""),
-                    height=240,
-                    key=f"text_{case_id}_{doc.get('filename')}",
-                )
-
-    with tab3:
-        st.subheader("Pruefhinweise zur Vollstaendigkeit")
-        notes = final_report.get("coverage_notes", [])
-        if notes:
-            for note in notes:
-                severity = note.get("severity", "LOW")
-                message = note.get("message", "")
-                documents = note.get("documents") or []
-                text = message if not documents else f"{message} Dokumente: {', '.join(documents)}"
-                if severity == "HIGH":
-                    st.error(text)
-                elif severity == "MEDIUM":
-                    st.warning(text)
-                else:
-                    st.info(text)
-        else:
-            st.success("Keine technischen Pruefhinweise.")
-
-        low_confidence = [entry for entry in entries if float(entry.get("confidence", 0) or 0) < 0.5]
-        if low_confidence:
-            st.markdown("#### Niedrig konfidente vorsorgliche Treffer")
-            st.dataframe(
-                pd.DataFrame(timeline_entries_to_rows(low_confidence)),
-                use_container_width=True,
-                hide_index=True,
-            )
-
-    with tab4:
-        st.subheader("Entwurf Aktennotiz")
-        st.text_area(
-            "Bearbeitbare Notiz",
-            value=final_report.get("aktennotiz_de", ""),
-            height=300,
-        )
-
-        col1, col2 = st.columns(2)
-        if txt_path and os.path.exists(txt_path):
-            with col1:
-                with open(txt_path, "r", encoding="utf-8") as f:
-                    st.download_button(
-                        "Aktennotiz herunterladen (.txt)",
-                        f.read(),
-                        file_name=f"case_{case_id}_note.txt",
-                    )
-        if json_path and os.path.exists(json_path):
-            with col2:
-                with open(json_path, "r", encoding="utf-8") as f:
-                    st.download_button(
-                        "Bericht herunterladen (.json)",
-                        f.read(),
-                        file_name=f"case_{case_id}_report.json",
-                    )
-
-
-st.title("🏛️ ABH-Assist")
+st.title("ABH-Assist")
 st.markdown("**Zielbezogene Aktenauswertung** - datierte dienliche Eintraege chronologisch finden")
 st.divider()
 
 analysis_goal = get_analysis_goal()
 
 st.info(
-    "Laden Sie die digitale Akte als PDF-Dateien hoch. Die KI sucht alle datierten Eintraege "
-    "und Dokumentinhalte, die fuer das Ziel dienlich sein koennen, und sortiert sie chronologisch."
+    "Laden Sie die digitale Akte als PDF- oder Bilddateien hoch. Die Analyse sucht alle datierten "
+    "Ereignisse, Entscheidungen, Dokumenthinweise und Umstaende, die fuer das gewaehlte Ziel "
+    "dienlich sein koennen, und ordnet sie chronologisch."
 )
 
 uploaded_files = st.file_uploader(
@@ -224,8 +98,8 @@ if st.button("Akte chronologisch auswerten", type="primary", use_container_width
 
         for uploaded_file in uploaded_files:
             file_path = os.path.join(temp_case_dir, uploaded_file.name)
-            with open(file_path, "wb") as f:
-                f.write(uploaded_file.getbuffer())
+            with open(file_path, "wb") as file_obj:
+                file_obj.write(uploaded_file.getbuffer())
 
         progress_bar = st.progress(0)
         status_text = st.empty()
@@ -247,6 +121,8 @@ if st.button("Akte chronologisch auswerten", type="primary", use_container_width
         os.rename(temp_case_dir, case_dir)
 
         json_path, txt_path = save_report(case_id, final_report)
+        timeline_summary = final_report.get("timeline_summary", {})
+        date_range = timeline_summary.get("date_range", {})
         case_metadata = {
             "case_id": case_id,
             "applicant_name": applicant_name,
@@ -257,7 +133,14 @@ if st.button("Akte chronologisch auswerten", type="primary", use_container_width
             "missing_documents": [],
             "document_count": len(uploaded_files),
             "timeline_entry_count": len(final_report.get("timeline_entries", [])),
-            "case_details": {"analysis_goal": analysis_goal},
+            "documents_with_entries": timeline_summary.get("documents_with_entries", 0),
+            "low_confidence_entry_count": timeline_summary.get("low_confidence_count", 0),
+            "date_range_start": date_range.get("start"),
+            "date_range_end": date_range.get("end"),
+            "case_details": {
+                "analysis_goal": analysis_goal,
+                "timeline_summary": timeline_summary,
+            },
         }
         save_case_metadata(case_id, case_metadata)
 
